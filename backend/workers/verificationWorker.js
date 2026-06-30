@@ -1,0 +1,194 @@
+const { Worker } = require('bullmq')
+const { makeRedis } = require('../queue/queue')
+const { Builder, By, until, Key } = require('selenium-webdriver')
+const chrome = require('selenium-webdriver/chrome')
+const Job = require('../models/Job')
+const Number = require('../models/Number')
+
+const LYCA_URL = 'https://www.lycamobile.us/en/quick-top-up/'
+const BFF_URL_PATTERN = '/bff/profile/v3/valid/lyca-number'
+const WORKER_COUNT = parseInt(process.env.WORKER_COUNT || '1', 10)
+
+function buildChromeOptions() {
+  const opts = new chrome.Options()
+  opts.addArguments(
+    '--headless=new',
+    '--no-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-blink-features=AutomationControlled',
+    '--window-size=1280,800',
+    '--disable-extensions',
+    '--no-first-run',
+    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
+  )
+  opts.excludeSwitches(['enable-automation'])
+  opts.setLoggingPrefs({ performance: 'ALL' })
+  return opts
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+async function humanType(element, text) {
+  for (const char of text) {
+    await element.sendKeys(char)
+    await sleep(40 + Math.random() * 60)
+  }
+}
+
+/**
+ * Read Chrome performance logs and extract the HTTP status
+ * of the Lyca BFF validation call made after clicking verify.
+ * Returns 200 for valid, 4xx for invalid, null if not found.
+ */
+async function getBffStatus(driver) {
+  const logs = await driver.manage().logs().get('performance')
+  const responses = logs
+    .map(l => { try { return JSON.parse(l.message).message } catch { return null } })
+    .filter(m => m && m.method === 'Network.responseReceived')
+    .filter(m => m.params.response.url.includes(BFF_URL_PATTERN))
+
+  if (responses.length === 0) return null
+  return responses[responses.length - 1].params.response.status
+}
+
+/**
+ * Verify one phone number using DOM state — no BFF log interception.
+ * Valid   → arrow/next button with img appears inside the form
+ * Invalid → InputField_error_1 div appears, OR Notification popup appears
+ * Returns true (valid) or false (invalid).
+ */
+async function verifyNumber(driver, phone) {
+  try {
+    await driver.get(LYCA_URL)
+    await sleep(3000)
+
+    // Wait for input field
+    let input
+    try {
+      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), 12000)
+    } catch (_) {
+      console.warn(`[worker] page load timeout for ${phone}, retrying...`)
+      await driver.get(LYCA_URL)
+      await sleep(4000)
+      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), 12000)
+    }
+
+    // Scroll into view and focus
+    await driver.executeScript('arguments[0].scrollIntoView({block:"center"})', input)
+    await sleep(300)
+    await driver.executeScript('arguments[0].click()', input)
+    await sleep(150)
+
+    // Clear field
+    await driver.executeScript("arguments[0].value = ''", input)
+    await input.sendKeys(Key.CONTROL, 'a')
+    await input.sendKeys(Key.DELETE)
+    await sleep(150)
+
+    // Type number (10-digit format)
+    const dialNumber = phone.startsWith('1') && phone.length === 11
+      ? phone.slice(1) : phone
+
+    await humanType(input, dialNumber)
+    await sleep(1000)
+
+    // Click verify button
+    const btn = await driver.findElement(By.css('div[class*="formContainer"] button'))
+    await driver.executeScript('arguments[0].click()', btn)
+
+    // Poll DOM for result — up to 8 seconds
+    // Valid = no invalid signal within the window
+    // Invalid = InputField_error_1 OR Notification popup appears
+    let isValid = true
+    const deadline = Date.now() + 8000
+    while (Date.now() < deadline) {
+      await sleep(400)
+
+      // INVALID signal 1: error text div under input
+      const errorDivs = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
+      if (errorDivs.length > 0) {
+        console.log(`[worker] ${phone} → invalid (error div)`)
+        isValid = false
+        break
+      }
+
+      // INVALID signal 2: notification popup (class match, ignores dynamic nth-child)
+      const popups = await driver.findElements(By.css('div[class*="Notification_boxPopupContainer"]'))
+      if (popups.length > 0) {
+        console.log(`[worker] ${phone} → invalid (notification popup)`)
+        isValid = false
+        break
+      }
+    }
+
+    if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 8s)`)
+    return isValid
+
+  } catch (err) {
+    console.error(`[worker] Error verifying ${phone}:`, err.message)
+    return false
+  }
+}
+
+function startWorkers() {
+  for (let i = 0; i < WORKER_COUNT; i++) {
+    let driver = null
+
+    const worker = new Worker(
+      'verification',
+      async (job) => {
+        const { phone, jobId } = job.data
+
+        if (!driver) {
+          driver = await new Builder()
+            .forBrowser('chrome')
+            .setChromeOptions(buildChromeOptions())
+            .build()
+          await driver.executeScript(
+            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
+          )
+          await driver.get(LYCA_URL)
+          await sleep(3500)
+          console.log(`[worker ${i}] browser ready`)
+        }
+
+        const isValid = await verifyNumber(driver, phone)
+
+        await Number.findOneAndUpdate({ jobId, phone }, { valid: isValid })
+
+        const update = {
+          $inc: {
+            completed: 1,
+            valid: isValid ? 1 : 0,
+            invalid: isValid ? 0 : 1,
+          },
+        }
+        const updatedJob = await Job.findByIdAndUpdate(jobId, update, { new: true })
+        if (updatedJob.completed >= updatedJob.total) {
+          await Job.findByIdAndUpdate(jobId, { status: 'done' })
+        }
+      },
+      {
+        connection: makeRedis(),
+        concurrency: 1,
+        lockDuration: 120000,
+        lockRenewTime: 30000,
+      },
+    )
+
+    worker.on('failed', (job, err) => {
+      console.error(`[worker ${i}] failed for ${job?.data?.phone}:`, err.message)
+    })
+
+    const cleanup = async () => {
+      if (driver) { try { await driver.quit() } catch (_) {} }
+    }
+    process.on('SIGTERM', cleanup)
+    process.on('SIGINT', cleanup)
+
+    console.log(`[worker ${i}] started`)
+  }
+}
+
+module.exports = { startWorkers }
