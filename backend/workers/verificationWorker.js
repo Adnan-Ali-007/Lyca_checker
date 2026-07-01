@@ -117,11 +117,11 @@ async function verifyNumber(driver, phone) {
     const btn = await driver.findElement(By.css('div[class*="formContainer"] button'))
     await driver.executeScript('arguments[0].click()', btn)
 
-    // Poll DOM for result — up to 8 seconds
+    // Poll DOM for result — up to 12 seconds
     // Valid = no invalid signal within the window
     // Invalid = InputField_error_1 OR Notification popup appears
     let isValid = true
-    const deadline = Date.now() + 8000
+    const deadline = Date.now() + 12000
     while (Date.now() < deadline) {
       await sleep(400)
 
@@ -136,13 +136,20 @@ async function verifyNumber(driver, phone) {
       // INVALID signal 2: notification popup (class match, ignores dynamic nth-child)
       const popups = await driver.findElements(By.css('div[class*="Notification_boxPopupContainer"]'))
       if (popups.length > 0) {
-        console.log(`[worker] ${phone} → invalid (notification popup)`)
-        isValid = false
-        break
+        // Extra check: make sure this is actually an error popup, not a bot-detection overlay
+        // by verifying the input field is still present (page loaded correctly)
+        const inputs = await driver.findElements(By.css('#default-input-field'))
+        if (inputs.length > 0) {
+          console.log(`[worker] ${phone} → invalid (notification popup)`)
+          isValid = false
+          break
+        }
+        // If input is gone, the page reloaded/changed — skip this signal
+        console.log(`[worker] ${phone} → popup detected but input gone, skipping signal`)
       }
     }
 
-    if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 8s)`)
+    if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 12s)`)
     return isValid
 
   } catch (err) {
