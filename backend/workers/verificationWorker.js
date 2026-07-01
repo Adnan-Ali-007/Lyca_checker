@@ -128,24 +128,29 @@ async function verifyNumber(driver, phone) {
       // INVALID signal 1: error text div under input
       const errorDivs = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
       if (errorDivs.length > 0) {
-        console.log(`[worker] ${phone} → invalid (error div)`)
-        isValid = false
-        break
+        // Confirm it's still there after 1s to avoid transient flashes
+        await sleep(1000)
+        const errorDivsConfirm = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
+        if (errorDivsConfirm.length > 0) {
+          console.log(`[worker] ${phone} → invalid (error div confirmed)`)
+          isValid = false
+          break
+        }
       }
 
       // INVALID signal 2: notification popup (class match, ignores dynamic nth-child)
       const popups = await driver.findElements(By.css('div[class*="Notification_boxPopupContainer"]'))
       if (popups.length > 0) {
-        // Extra check: make sure this is actually an error popup, not a bot-detection overlay
-        // by verifying the input field is still present (page loaded correctly)
+        // Confirm after 1s and check input is still present
+        await sleep(1000)
+        const popupsConfirm = await driver.findElements(By.css('div[class*="Notification_boxPopupContainer"]'))
         const inputs = await driver.findElements(By.css('#default-input-field'))
-        if (inputs.length > 0) {
-          console.log(`[worker] ${phone} → invalid (notification popup)`)
+        if (popupsConfirm.length > 0 && inputs.length > 0) {
+          console.log(`[worker] ${phone} → invalid (notification popup confirmed)`)
           isValid = false
           break
         }
-        // If input is gone, the page reloaded/changed — skip this signal
-        console.log(`[worker] ${phone} → popup detected but input gone, skipping signal`)
+        console.log(`[worker] ${phone} → popup detected but not confirmed, skipping signal`)
       }
     }
 
