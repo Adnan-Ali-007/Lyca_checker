@@ -9,18 +9,38 @@ const LYCA_URL = 'https://www.lycamobile.us/en/quick-top-up/'
 const BFF_URL_PATTERN = '/bff/profile/v3/valid/lyca-number'
 const WORKER_COUNT = parseInt(process.env.WORKER_COUNT || '1', 10)
 
-function buildChromeOptions() {
+const HEADLESS = process.env.HEADLESS === 'true'
+
+// Headed mode: tile windows in a 2-column grid so you can watch all workers
+const WIN_W = 700
+const WIN_H = 560
+const COLS  = 2
+
+function buildChromeOptions(workerIndex) {
   const opts = new chrome.Options()
+
+  if (HEADLESS) {
+    // Server / CI — no display available
+    opts.addArguments('--headless=new')
+  } else {
+    // Local — position windows in a grid so they don't stack
+    const col    = workerIndex % COLS
+    const row    = Math.floor(workerIndex / COLS)
+    const startX = col * (WIN_W + 8) + 8
+    const startY = row * (WIN_H + 50) + 50
+    opts.addArguments(
+      `--window-size=${WIN_W},${WIN_H}`,
+      `--window-position=${startX},${startY}`,
+    )
+  }
+
   opts.addArguments(
-    '--headless=new',
     '--no-sandbox',
     '--disable-dev-shm-usage',
-    '--disable-gpu',
     '--disable-blink-features=AutomationControlled',
-    '--window-size=1280,800',
     '--disable-extensions',
     '--no-first-run',
-    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
+    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   )
   opts.excludeSwitches(['enable-automation'])
   opts.setLoggingPrefs({ performance: 'ALL' })
@@ -143,7 +163,7 @@ function startWorkers() {
         if (!driver) {
           driver = await new Builder()
             .forBrowser('chrome')
-            .setChromeOptions(buildChromeOptions())
+            .setChromeOptions(buildChromeOptions(i))
             .build()
           await driver.executeScript(
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
@@ -153,7 +173,10 @@ function startWorkers() {
           console.log(`[worker ${i}] browser ready`)
         }
 
+        const t0 = Date.now()
         const isValid = await verifyNumber(driver, phone)
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(2)
+        console.log(`[worker ${i}] ⏱  ${phone} took ${elapsed}s`)
 
         await Number.findOneAndUpdate({ jobId, phone }, { valid: isValid })
 
@@ -167,6 +190,20 @@ function startWorkers() {
         const updatedJob = await Job.findByIdAndUpdate(jobId, update, { new: true })
         if (updatedJob.completed >= updatedJob.total) {
           await Job.findByIdAndUpdate(jobId, { status: 'done' })
+
+          // ── Batch timing summary ───────────────────────────────────────
+          const batchMs  = Date.now() - updatedJob.createdAt.getTime()
+          const batchSec = (batchMs / 1000).toFixed(1)
+          const perNum   = (batchMs / updatedJob.total / 1000).toFixed(2)
+          console.log('════════════════════════════════════════')
+          console.log(`  ✅ Job ${jobId} complete`)
+          console.log(`  Total numbers : ${updatedJob.total}`)
+          console.log(`  Valid         : ${updatedJob.valid}`)
+          console.log(`  Invalid       : ${updatedJob.invalid}`)
+          console.log(`  Wall-clock    : ${batchSec}s`)
+          console.log(`  Avg per number: ${perNum}s`)
+          console.log(`  Workers used  : ${WORKER_COUNT}`)
+          console.log('════════════════════════════════════════')
         }
       },
       {
@@ -174,6 +211,7 @@ function startWorkers() {
         concurrency: 1,
         lockDuration: 120000,
         lockRenewTime: 30000,
+        maxStalledCount: 0, // don't re-queue stalled jobs — mark them failed instead
       },
     )
 

@@ -1,11 +1,44 @@
 import { useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import LoginPage from './pages/LoginPage'
+import SignupPage from './pages/SignupPage'
 import UploadSection from './components/UploadSection'
 import ProgressSection from './components/ProgressSection'
 import ResultsSection from './components/ResultsSection'
 import './index.css'
 
-// Stages: idle | processing | done
 export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route
+            path="/*"
+            element={
+              <RequireAuth>
+                <MainApp />
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  )
+}
+
+// ── Route guard ──────────────────────────────────────────────────────────────
+function RequireAuth({ children }) {
+  const { auth } = useAuth()
+  if (!auth) return <Navigate to="/login" replace />
+  return children
+}
+
+// ── Main application (post-login) ────────────────────────────────────────────
+// Stages: idle | processing | done
+function MainApp() {
   const [stage, setStage] = useState('idle')
   const [jobId, setJobId] = useState(null)
   const [progress, setProgress] = useState({ total: 0, completed: 0, valid: 0, invalid: 0 })
@@ -44,6 +77,8 @@ export default function App() {
 }
 
 function Header() {
+  const { auth, logout } = useAuth()
+
   return (
     <header style={{
       borderBottom: '1px solid var(--border)',
@@ -71,6 +106,33 @@ function Header() {
         padding: '2px 8px', borderRadius: 20,
         border: '1px solid rgba(108,99,255,0.3)'
       }}>Prod</span>
+
+      {/* Spacer */}
+      <div style={{ flex: 1 }} />
+
+      {/* User info + logout */}
+      {auth && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{auth.user.name}</span>
+          <button
+            onClick={logout}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              padding: '5px 12px',
+              color: 'var(--text-muted)',
+              fontSize: 13,
+              cursor: 'pointer',
+              transition: 'border-color 0.2s, color 0.2s',
+            }}
+            onMouseEnter={e => { e.target.style.borderColor = 'var(--red)'; e.target.style.color = 'var(--red)' }}
+            onMouseLeave={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.color = 'var(--text-muted)' }}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
     </header>
   )
 }

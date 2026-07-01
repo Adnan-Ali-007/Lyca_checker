@@ -2,7 +2,15 @@ import { CheckCircle2, Download, RotateCcw } from 'lucide-react'
 
 export default function ResultsSection({ jobId, progress, onReset }) {
   const download = (format) => {
-    window.open(`/api/download/${jobId}?format=${format}`, '_blank')
+    // Token passed as query param because window.open can't set headers
+    let token = ''
+    try {
+      const stored = localStorage.getItem('auth')
+      if (stored) token = JSON.parse(stored).token || ''
+    } catch { /* ignore */ }
+
+    const base = import.meta.env.VITE_API_URL || ''
+    window.open(`${base}/api/download/${jobId}?format=${format}&token=${token}`, '_blank')
   }
 
   return (

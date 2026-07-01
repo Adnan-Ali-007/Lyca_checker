@@ -29,7 +29,7 @@ async function getBffStatus(driver) {
 
 async function run() {
   const opts = new chrome.Options()
-  opts.addArguments(
+  opts.addArguments('--headed',
     '--no-sandbox','--disable-dev-shm-usage','--disable-gpu',
     '--disable-blink-features=AutomationControlled',
     '--window-size=1280,800','--disable-extensions','--no-first-run',

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import axios from 'axios'
+import api from '../api'
 import { Loader2 } from 'lucide-react'
 
 export default function ProgressSection({ jobId, progress, setProgress, onComplete }) {
@@ -8,7 +8,7 @@ export default function ProgressSection({ jobId, progress, setProgress, onComple
   useEffect(() => {
     const poll = async () => {
       try {
-        const { data } = await axios.get(`/api/job/${jobId}`, { params: { _t: Date.now() } })
+        const { data } = await api.get(`/api/job/${jobId}`, { params: { _t: Date.now() } })
         setProgress({
           total: data.total,
           completed: data.completed,

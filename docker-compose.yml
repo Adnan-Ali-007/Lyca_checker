@@ -1,0 +1,38 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "80:4000"
+    environment:
+      PORT: 4000
+      MONGO_URI: ${MONGO_URI}
+      REDIS_URL: redis://redis:6379
+      WORKER_COUNT: ${WORKER_COUNT:-6}
+      HEADLESS: "true"
+      UPLOAD_DIR: ./uploads
+      OUTPUT_DIR: ./outputs
+      # Auth
+      JWT_SECRET: ${JWT_SECRET}
+      # Email
+      MAIL_SERVICE: ${MAIL_SERVICE}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_PASS: ${MAIL_PASS}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      # Public URLs — set to your Oracle server public IP
+      BACKEND_URL: ${BACKEND_URL}
+      FRONTEND_URL: ${FRONTEND_URL}
+    depends_on:
+      - redis
+    volumes:
+      - uploads:/app/backend/uploads
+      - outputs:/app/backend/outputs
+
+volumes:
+  uploads:
+  outputs:

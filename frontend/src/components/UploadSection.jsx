@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
-import axios from 'axios'
+import api from '../api'
 import { Upload, FileText, AlertCircle } from 'lucide-react'
 
 export default function UploadSection({ onSuccess }) {
@@ -31,7 +31,7 @@ export default function UploadSection({ onSuccess }) {
     try {
       const form = new FormData()
       form.append('file', file)
-      const { data } = await axios.post('/api/upload', form, { timeout: 30000 })
+      const { data } = await api.post('/api/upload', form, { timeout: 30000 })
       onSuccess(data.jobId, data.total)
     } catch (e) {
       setError(e.response?.data?.message || 'Upload failed. Is the backend running?')
