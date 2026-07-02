@@ -172,6 +172,12 @@ async function verifyNumber(driver, phone) {
 
   } catch (err) {
     console.error(`[worker] Error verifying ${phone}:`, err.message)
+    // Signal caller that browser needs restart
+    if (err.message && (err.message.includes('tab crashed') || err.message.includes('invalid session') || err.message.includes('no such session') || err.message.includes('renderer'))) {
+      const crashErr = new Error(err.message)
+      crashErr.browserCrashed = true
+      throw crashErr
+    }
     return false
   }
 }
@@ -201,7 +207,37 @@ function startWorkers() {
         }
 
         const t0 = Date.now()
-        const isValid = await verifyNumber(driver, phone)
+        let isValid = false
+        try {
+          isValid = await verifyNumber(driver, phone)
+        } catch (err) {
+          if (err.browserCrashed) {
+            console.warn(`[worker ${i}] browser crashed, restarting...`)
+            try { await driver.quit() } catch (_) {}
+            driver = null
+            // Restart browser
+            await sleep(3000)
+            driver = await new Builder()
+              .forBrowser('chrome')
+              .setChromeOptions(buildChromeOptions(i))
+              .build()
+            await driver.executeScript(
+              "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
+            )
+            await driver.get(LYCA_URL)
+            await sleep(3500)
+            console.log(`[worker ${i}] browser restarted, retrying ${phone}`)
+            try {
+              isValid = await verifyNumber(driver, phone)
+            } catch (_) {
+              console.error(`[worker ${i}] retry failed for ${phone}, marking invalid`)
+              isValid = false
+            }
+          } else {
+            console.error(`[worker ${i}] unexpected error for ${phone}:`, err.message)
+            isValid = false
+          }
+        }
         const elapsed = ((Date.now() - t0) / 1000).toFixed(2)
         console.log(`[worker ${i}] ⏱  ${phone} took ${elapsed}s`)
 
