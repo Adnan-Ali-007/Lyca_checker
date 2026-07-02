@@ -164,6 +164,10 @@ async function verifyNumber(driver, phone) {
     }
 
     if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 12s)`)
+
+    // Small random delay between verifications to avoid rate limiting
+    await sleep(1000 + Math.random() * 2000)
+
     return isValid
 
   } catch (err) {
@@ -182,6 +186,8 @@ function startWorkers() {
         const { phone, jobId } = job.data
 
         if (!driver) {
+          // Stagger worker startups to avoid hammering Lyca simultaneously
+          await sleep(i * 4000)
           driver = await new Builder()
             .forBrowser('chrome')
             .setChromeOptions(buildChromeOptions(i))
