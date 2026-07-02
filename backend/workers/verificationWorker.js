@@ -34,12 +34,21 @@ function buildChromeOptions(workerIndex) {
     )
   }
 
+  // Add proxy if configured
+  const proxyUrl = process.env.PROXY_URL
+  if (proxyUrl) {
+    opts.addArguments(`--proxy-server=${proxyUrl}`)
+  }
+
   opts.addArguments(
     '--no-sandbox',
     '--disable-dev-shm-usage',
     '--disable-blink-features=AutomationControlled',
     '--disable-extensions',
     '--no-first-run',
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--js-flags=--max-old-space-size=512',
     '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   )
   opts.excludeSwitches(['enable-automation'])
