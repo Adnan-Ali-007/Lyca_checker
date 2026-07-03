@@ -10,6 +10,7 @@ const BFF_URL_PATTERN = '/bff/profile/v3/valid/lyca-number'
 const WORKER_COUNT = parseInt(process.env.WORKER_COUNT || '1', 10)
 
 const HEADLESS = process.env.HEADLESS === 'true'
+const WORKER_TIMEOUT_MS = parseInt(process.env.WORKER_TIMEOUT_MS || '90000', 10)
 
 // Headed mode: tile windows in a 2-column grid so you can watch all workers
 const WIN_W = 700
@@ -182,8 +183,8 @@ async function verifyNumber(driver, phone) {
 
   } catch (err) {
     console.error(`[worker] Error verifying ${phone}:`, err.message)
-    // Signal caller that browser needs restart
-    if (err.message && (err.message.includes('tab crashed') || err.message.includes('invalid session') || err.message.includes('no such session') || err.message.includes('renderer'))) {
+    // Signal caller that browser needs restart or retry
+    if (err.message && (err.message.includes('tab crashed') || err.message.includes('invalid session') || err.message.includes('no such session') || err.message.includes('renderer') || err.message.includes('script timeout') || err.message.includes('Timed out receiving message'))) {
       const crashErr = new Error(err.message)
       crashErr.browserCrashed = true
       throw crashErr
@@ -219,7 +220,11 @@ function startWorkers() {
         const t0 = Date.now()
         let isValid = false
         try {
-          isValid = await verifyNumber(driver, phone)
+          // Enforce 90s max per number — if proxy is too slow, restart and retry
+          isValid = await Promise.race([
+            verifyNumber(driver, phone),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('verification timeout after 90s')), WORKER_TIMEOUT_MS))
+          ])
         } catch (err) {
           if (err.browserCrashed) {
             console.warn(`[worker ${i}] browser crashed, restarting...`)
@@ -282,8 +287,8 @@ function startWorkers() {
       {
         connection: makeRedis(),
         concurrency: 1,
-        lockDuration: 120000,
-        lockRenewTime: 30000,
+        lockDuration: 600000,
+        lockRenewTime: 60000,
         maxStalledCount: 0, // don't re-queue stalled jobs — mark them failed instead
       },
     )
