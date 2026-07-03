@@ -92,6 +92,16 @@ async function verifyNumber(driver, phone) {
     await driver.get(LYCA_URL)
     await sleep(3000)
 
+    // Dismiss VWO ad popup if it appears
+    try {
+      const adClose = await driver.findElements(By.css('[id^="vwo-widget"] div.vwo-modal-wrapper button'))
+      if (adClose.length > 0) {
+        await driver.executeScript('arguments[0].click()', adClose[0])
+        await sleep(500)
+        console.log(`[worker] ${phone} → dismissed ad popup`)
+      }
+    } catch (_) {}
+
     // Wait for input field
     let input
     try {
