@@ -38,7 +38,11 @@ function buildChromeOptions(workerIndex) {
   // Add proxy if configured
   const proxyUrl = process.env.PROXY_URL
   if (proxyUrl) {
-    opts.addArguments(`--proxy-server=${proxyUrl}`)
+    // Chrome only supports socks5://, not socks5h:// — convert if needed
+    const chromeProxyUrl = proxyUrl.replace(/^socks5h:\/\//, 'socks5://')
+    opts.addArguments(`--proxy-server=${chromeProxyUrl}`)
+    // Force DNS resolution through the proxy (prevents DNS leaks)
+    opts.addArguments('--proxy-dns')
   }
 
   opts.addArguments(
