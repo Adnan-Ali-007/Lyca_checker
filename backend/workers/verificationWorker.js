@@ -51,7 +51,6 @@ function buildChromeOptions(workerIndex) {
     }
     opts.addArguments(`--proxy-server=${chromeProxyUrl}`)
   }
-  }
 
   opts.addArguments(
     '--no-sandbox',
