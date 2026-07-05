@@ -20,6 +20,11 @@ const COLS  = 2
 function buildChromeOptions(workerIndex) {
   const opts = new chrome.Options()
 
+  // In Docker, chromium is at /usr/bin/chromium — point selenium at it
+  if (process.env.CHROME_BIN) {
+    opts.setChromeBinaryPath(process.env.CHROME_BIN)
+  }
+
   if (HEADLESS) {
     // Server / CI — no display available
     opts.addArguments('--headless=new')
@@ -53,6 +58,7 @@ function buildChromeOptions(workerIndex) {
     '--no-first-run',
     '--disable-gpu',
     '--disable-software-rasterizer',
+    '--disable-dbus',
     '--js-flags=--max-old-space-size=512',
     '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   )
@@ -181,7 +187,7 @@ async function verifyNumber(driver, phone) {
     if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 12s)`)
 
     // Small random delay between verifications to avoid rate limiting
-    await sleep(1000 + Math.random() * 2000)
+    await sleep(500 + Math.random() * 1000)
 
     return isValid
 
