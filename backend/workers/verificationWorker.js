@@ -147,6 +147,9 @@ async function verifyNumber(driver, phone) {
     const btn = await driver.findElement(By.css('div[class*="formContainer"] button'))
     await driver.executeScript('arguments[0].click()', btn)
 
+    // Wait for page to settle after clicking verify before polling
+    await sleep(2000)
+
     // Poll DOM for result — up to 12 seconds
     // Valid = no invalid signal within the window
     // Invalid = InputField_error_1 OR Notification popup appears
@@ -187,7 +190,7 @@ async function verifyNumber(driver, phone) {
     if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 12s)`)
 
     // Small random delay between verifications to avoid rate limiting
-    await sleep(500 + Math.random() * 1000)
+    await sleep(1000 + Math.random() * 2000)
 
     return isValid
 
