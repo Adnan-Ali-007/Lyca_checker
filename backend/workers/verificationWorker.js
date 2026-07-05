@@ -187,8 +187,7 @@ async function verifyNumber(driver, phone) {
     if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 12s)`)
 
     // Small random delay between verifications to avoid rate limiting
-    await sleep(500 + Math.random() * 1000)
-
+    await sleep(1000 + Math.random() * 2000)
     return isValid
 
   } catch (err) {
