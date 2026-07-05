@@ -20,11 +20,6 @@ const COLS  = 2
 function buildChromeOptions(workerIndex) {
   const opts = new chrome.Options()
 
-  // In Docker, chromium is at /usr/bin/chromium — point selenium at it
-  if (process.env.CHROME_BIN) {
-    opts.setChromeBinaryPath(process.env.CHROME_BIN)
-  }
-
   if (HEADLESS) {
     // Server / CI — no display available
     opts.addArguments('--headless=new')
@@ -58,7 +53,6 @@ function buildChromeOptions(workerIndex) {
     '--no-first-run',
     '--disable-gpu',
     '--disable-software-rasterizer',
-    '--disable-dbus',
     '--js-flags=--max-old-space-size=512',
     '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   )
@@ -146,9 +140,6 @@ async function verifyNumber(driver, phone) {
     // Click verify button
     const btn = await driver.findElement(By.css('div[class*="formContainer"] button'))
     await driver.executeScript('arguments[0].click()', btn)
-
-    // Wait for page to settle after clicking verify before polling
-    await sleep(2000)
 
     // Poll DOM for result — up to 12 seconds
     // Valid = no invalid signal within the window
