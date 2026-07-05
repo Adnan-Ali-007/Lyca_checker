@@ -44,8 +44,13 @@ function buildChromeOptions(workerIndex) {
   const proxyUrl = process.env.PROXY_URL
   if (proxyUrl) {
     // Chrome only supports socks5://, not socks5h:// — convert if needed
-    const chromeProxyUrl = proxyUrl.replace(/^socks5h:\/\//, 'socks5://')
+    // For http:// proxies, Chrome needs the format without protocol prefix
+    let chromeProxyUrl = proxyUrl.replace(/^socks5h:\/\//, 'socks5://')
+    if (chromeProxyUrl.startsWith('http://')) {
+      chromeProxyUrl = chromeProxyUrl.replace(/^http:\/\//, '')
+    }
     opts.addArguments(`--proxy-server=${chromeProxyUrl}`)
+    opts.addArguments('--proxy-dns')
     // Force DNS resolution through the proxy (prevents DNS leaks)
     opts.addArguments('--proxy-dns')
   }
