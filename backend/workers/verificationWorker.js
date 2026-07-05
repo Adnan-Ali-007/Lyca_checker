@@ -20,6 +20,11 @@ const COLS  = 2
 function buildChromeOptions(workerIndex) {
   const opts = new chrome.Options()
 
+  // In Docker, chromium is at /usr/bin/chromium — point selenium at it
+  if (process.env.CHROME_BIN) {
+    opts.setChromeBinaryPath(process.env.CHROME_BIN)
+  }
+
   if (HEADLESS) {
     // Server / CI — no display available
     opts.addArguments('--headless=new')
@@ -212,6 +217,7 @@ function startWorkers() {
           driver = await new Builder()
             .forBrowser('chrome')
             .setChromeOptions(buildChromeOptions(i))
+            .setChromeService(new (require('selenium-webdriver/chrome').ServiceBuilder)(process.env.CHROMEDRIVER_PATH || undefined))
             .build()
           await driver.executeScript(
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
@@ -239,6 +245,7 @@ function startWorkers() {
             driver = await new Builder()
               .forBrowser('chrome')
               .setChromeOptions(buildChromeOptions(i))
+              .setChromeService(new (require('selenium-webdriver/chrome').ServiceBuilder)(process.env.CHROMEDRIVER_PATH || undefined))
               .build()
             await driver.executeScript(
               "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
