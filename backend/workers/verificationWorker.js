@@ -58,6 +58,7 @@ function buildChromeOptions(workerIndex) {
     '--no-first-run',
     '--disable-gpu',
     '--disable-software-rasterizer',
+    '--disable-dbus',
     '--js-flags=--max-old-space-size=512',
     '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   )
@@ -217,7 +218,6 @@ function startWorkers() {
           driver = await new Builder()
             .forBrowser('chrome')
             .setChromeOptions(buildChromeOptions(i))
-            .setChromeService(new (require('selenium-webdriver/chrome').ServiceBuilder)(process.env.CHROMEDRIVER_PATH || undefined))
             .build()
           await driver.executeScript(
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
@@ -245,7 +245,6 @@ function startWorkers() {
             driver = await new Builder()
               .forBrowser('chrome')
               .setChromeOptions(buildChromeOptions(i))
-              .setChromeService(new (require('selenium-webdriver/chrome').ServiceBuilder)(process.env.CHROMEDRIVER_PATH || undefined))
               .build()
             await driver.executeScript(
               "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
