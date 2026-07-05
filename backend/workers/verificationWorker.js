@@ -50,9 +50,7 @@ function buildChromeOptions(workerIndex) {
       chromeProxyUrl = chromeProxyUrl.replace(/^http:\/\//, '')
     }
     opts.addArguments(`--proxy-server=${chromeProxyUrl}`)
-    opts.addArguments('--proxy-dns')
-    // Force DNS resolution through the proxy (prevents DNS leaks)
-    opts.addArguments('--proxy-dns')
+  }
   }
 
   opts.addArguments(
