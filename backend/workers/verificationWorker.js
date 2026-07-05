@@ -103,7 +103,7 @@ async function getBffStatus(driver) {
 async function verifyNumber(driver, phone) {
   try {
     await driver.get(LYCA_URL)
-    await sleep(5000)
+    await sleep(3000)
 
     // Dismiss VWO ad popup if it appears
     try {
@@ -118,12 +118,12 @@ async function verifyNumber(driver, phone) {
     // Wait for input field
     let input
     try {
-      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), 25000)
+      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), 12000)
     } catch (_) {
       console.warn(`[worker] page load timeout for ${phone}, retrying...`)
       await driver.get(LYCA_URL)
-      await sleep(5000)
-      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), 25000)
+      await sleep(4000)
+      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), 12000)
     }
 
     // Scroll into view and focus
