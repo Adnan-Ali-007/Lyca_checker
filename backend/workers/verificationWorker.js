@@ -4,6 +4,8 @@ const { Builder, By, until, Key } = require('selenium-webdriver')
 const chrome = require('selenium-webdriver/chrome')
 const Job = require('../models/Job')
 const Number = require('../models/Number')
+const fs = require('fs')
+const path = require('path')
 
 const LYCA_URL = 'https://www.lycamobile.us/en/quick-top-up/'
 const BFF_URL_PATTERN = '/bff/profile/v3/valid/lyca-number'
@@ -43,26 +45,108 @@ function buildChromeOptions(workerIndex) {
   // Add proxy if configured
   const proxyUrl = process.env.PROXY_URL
   if (proxyUrl) {
-    // Chrome only supports socks5://, not socks5h:// — convert if needed
-    const chromeProxyUrl = proxyUrl.replace(/^socks5h:\/\//, 'socks5://')
-    opts.addArguments(`--proxy-server=${chromeProxyUrl}`)
+    const parsed = parseProxyUrl(proxyUrl)
+    if (parsed.user && parsed.pass && !parsed.isSocks) {
+      // HTTP proxy with credentials — Chrome ignores inline user:pass in the
+      // --proxy-server flag, so we inject a tiny extension that handles the
+      // onAuthRequired event and supplies the credentials automatically.
+      const extPath = buildProxyAuthExtension(parsed)
+      opts.addArguments('--load-extension=' + extPath)
+      opts.addArguments(`--proxy-server=${parsed.host}:${parsed.port}`)
+    } else {
+      // SOCKS5 proxy (no extension needed, credentials go inline)
+      let chromeProxyUrl = proxyUrl.replace(/^socks5h:\/\//, 'socks5://')
+      if (chromeProxyUrl.startsWith('http://')) {
+        chromeProxyUrl = chromeProxyUrl.replace(/^http:\/\//, '')
+      }
+      opts.addArguments(`--proxy-server=${chromeProxyUrl}`)
+    }
   }
 
-  opts.addArguments(
+  const extraArgs = [
     '--no-sandbox',
     '--disable-dev-shm-usage',
     '--disable-blink-features=AutomationControlled',
-    '--disable-extensions',
     '--no-first-run',
     '--disable-gpu',
     '--disable-software-rasterizer',
     '--disable-dbus',
     '--js-flags=--max-old-space-size=512',
-    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-  )
+    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  ]
+  // Only disable extensions when NOT using the proxy auth extension
+  if (!proxyUrl || proxyUrl === '') {
+    extraArgs.push('--disable-extensions')
+  }
+  opts.addArguments(...extraArgs)
   opts.excludeSwitches(['enable-automation'])
   opts.setLoggingPrefs({ performance: 'ALL' })
   return opts
+}
+
+/**
+ * Parse a proxy URL like http://user:pass@host:port into its components.
+ */
+function parseProxyUrl(proxyUrl) {
+  try {
+    // URL constructor needs a valid scheme
+    const url = new URL(proxyUrl.startsWith('http') ? proxyUrl : 'http://' + proxyUrl)
+    return {
+      host: url.hostname,
+      port: url.port || '10000',
+      user: decodeURIComponent(url.username || ''),
+      pass: decodeURIComponent(url.password || ''),
+      isSocks: proxyUrl.startsWith('socks'),
+    }
+  } catch {
+    // Fallback: manual parse for host:port
+    const parts = proxyUrl.replace(/^https?:\/\//, '').split(':')
+    return { host: parts[0], port: parts[1] || '10000', user: '', pass: '', isSocks: false }
+  }
+}
+
+/**
+ * Build a temporary Chrome extension directory that handles proxy authentication.
+ * Chrome's --proxy-server flag ignores credentials in the URL, so this is the
+ * only reliable way to authenticate HTTP proxies in headless/Selenium Chrome.
+ * Returns the path to the unpacked extension directory.
+ */
+function buildProxyAuthExtension({ host, port, user, pass }) {
+  const extDir = path.join(__dirname, '..', 'proxy_ext')
+  fs.mkdirSync(extDir, { recursive: true })
+
+  const manifest = JSON.stringify({
+    manifest_version: 2,
+    name: 'Proxy Auth',
+    version: '1.0',
+    permissions: ['proxy', 'webRequest', 'webRequestAuthProvider', '<all_urls>'],
+    background: { scripts: ['background.js'], persistent: true },
+  })
+
+  const background = `
+var config = {
+  mode: "fixed_servers",
+  rules: {
+    singleProxy: { scheme: "http", host: ${JSON.stringify(host)}, port: parseInt(${JSON.stringify(port)}) },
+    bypassList: ["localhost", "127.0.0.1"]
+  }
+};
+chrome.proxy.settings.set({ value: config, scope: "regular" }, function() {});
+
+chrome.webRequest.onAuthRequired.addListener(
+  function(details) {
+    return { authCredentials: { username: ${JSON.stringify(user)}, password: ${JSON.stringify(pass)} } };
+  },
+  { urls: ["<all_urls>"] },
+  ["blocking"]
+);
+`
+
+  fs.writeFileSync(path.join(extDir, 'manifest.json'), manifest)
+  fs.writeFileSync(path.join(extDir, 'background.js'), background)
+
+  console.log(`[proxy] Auth extension built → ${extDir}`)
+  return extDir
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
