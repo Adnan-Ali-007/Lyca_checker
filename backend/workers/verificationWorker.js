@@ -4,8 +4,7 @@ const { Builder, By, until, Key } = require('selenium-webdriver')
 const chrome = require('selenium-webdriver/chrome')
 const Job = require('../models/Job')
 const Number = require('../models/Number')
-const fs = require('fs')
-const path = require('path')
+const proxyChain = require('proxy-chain')
 
 const LYCA_URL = 'https://www.lycamobile.us/en/quick-top-up/'
 const BFF_URL_PATTERN = '/bff/profile/v3/valid/lyca-number'
@@ -19,6 +18,35 @@ const WIN_W = 700
 const WIN_H = 560
 const COLS  = 2
 
+// Holds the local proxy-chain server instance (one shared across all workers)
+let localProxyUrl = null
+
+/**
+ * Start a local anonymous proxy tunnel that forwards to the upstream
+ * authenticated proxy. Chrome connects to localhost with no auth needed,
+ * proxy-chain handles credential injection to Decodo upstream.
+ * Called once before workers start.
+ */
+async function startProxyTunnel() {
+  const upstreamUrl = process.env.PROXY_URL
+  if (!upstreamUrl) return null
+
+  const server = new proxyChain.Server({
+    port: 0, // pick any free port
+    prepareRequestFunction: () => ({
+      upstreamProxyUrl: upstreamUrl,
+    }),
+  })
+
+  await new Promise((resolve, reject) => {
+    server.listen((err) => err ? reject(err) : resolve())
+  })
+
+  localProxyUrl = `http://127.0.0.1:${server.port}`
+  console.log(`[proxy] tunnel started → ${localProxyUrl} → ${upstreamUrl.replace(/:([^@]+)@/, ':***@')}`)
+  return server
+}
+
 function buildChromeOptions(workerIndex) {
   const opts = new chrome.Options()
 
@@ -28,10 +56,9 @@ function buildChromeOptions(workerIndex) {
   }
 
   if (HEADLESS) {
-    // Server / CI — no display available
     opts.addArguments('--headless=new')
   } else {
-    // Local — position windows in a grid so they don't stack
+    // Local — position windows in a 2-column grid
     const col    = workerIndex % COLS
     const row    = Math.floor(workerIndex / COLS)
     const startX = col * (WIN_W + 8) + 8
@@ -42,111 +69,26 @@ function buildChromeOptions(workerIndex) {
     )
   }
 
-  // Add proxy if configured
-  const proxyUrl = process.env.PROXY_URL
-  if (proxyUrl) {
-    const parsed = parseProxyUrl(proxyUrl)
-    if (parsed.user && parsed.pass && !parsed.isSocks) {
-      // HTTP proxy with credentials — Chrome ignores inline user:pass in the
-      // --proxy-server flag, so we inject a tiny extension that handles the
-      // onAuthRequired event and supplies the credentials automatically.
-      const extPath = buildProxyAuthExtension(parsed)
-      opts.addArguments('--load-extension=' + extPath)
-      opts.addArguments(`--proxy-server=${parsed.host}:${parsed.port}`)
-    } else {
-      // SOCKS5 proxy (no extension needed, credentials go inline)
-      let chromeProxyUrl = proxyUrl.replace(/^socks5h:\/\//, 'socks5://')
-      if (chromeProxyUrl.startsWith('http://')) {
-        chromeProxyUrl = chromeProxyUrl.replace(/^http:\/\//, '')
-      }
-      opts.addArguments(`--proxy-server=${chromeProxyUrl}`)
-    }
+  // Route through local unauthenticated tunnel (proxy-chain handles auth)
+  if (localProxyUrl) {
+    opts.addArguments(`--proxy-server=${localProxyUrl}`)
   }
 
-  const extraArgs = [
+  opts.addArguments(
     '--no-sandbox',
     '--disable-dev-shm-usage',
     '--disable-blink-features=AutomationControlled',
+    '--disable-extensions',
     '--no-first-run',
     '--disable-gpu',
     '--disable-software-rasterizer',
     '--disable-dbus',
     '--js-flags=--max-old-space-size=512',
-    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  ]
-  // Only disable extensions when NOT using the proxy auth extension
-  if (!proxyUrl || proxyUrl === '') {
-    extraArgs.push('--disable-extensions')
-  }
-  opts.addArguments(...extraArgs)
+    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+  )
   opts.excludeSwitches(['enable-automation'])
   opts.setLoggingPrefs({ performance: 'ALL' })
   return opts
-}
-
-/**
- * Parse a proxy URL like http://user:pass@host:port into its components.
- */
-function parseProxyUrl(proxyUrl) {
-  try {
-    // URL constructor needs a valid scheme
-    const url = new URL(proxyUrl.startsWith('http') ? proxyUrl : 'http://' + proxyUrl)
-    return {
-      host: url.hostname,
-      port: url.port || '10000',
-      user: decodeURIComponent(url.username || ''),
-      pass: decodeURIComponent(url.password || ''),
-      isSocks: proxyUrl.startsWith('socks'),
-    }
-  } catch {
-    // Fallback: manual parse for host:port
-    const parts = proxyUrl.replace(/^https?:\/\//, '').split(':')
-    return { host: parts[0], port: parts[1] || '10000', user: '', pass: '', isSocks: false }
-  }
-}
-
-/**
- * Build a temporary Chrome extension directory that handles proxy authentication.
- * Chrome's --proxy-server flag ignores credentials in the URL, so this is the
- * only reliable way to authenticate HTTP proxies in headless/Selenium Chrome.
- * Returns the path to the unpacked extension directory.
- */
-function buildProxyAuthExtension({ host, port, user, pass }) {
-  const extDir = path.join(__dirname, '..', 'proxy_ext')
-  fs.mkdirSync(extDir, { recursive: true })
-
-  const manifest = JSON.stringify({
-    manifest_version: 2,
-    name: 'Proxy Auth',
-    version: '1.0',
-    permissions: ['proxy', 'webRequest', 'webRequestAuthProvider', '<all_urls>'],
-    background: { scripts: ['background.js'], persistent: true },
-  })
-
-  const background = `
-var config = {
-  mode: "fixed_servers",
-  rules: {
-    singleProxy: { scheme: "http", host: ${JSON.stringify(host)}, port: parseInt(${JSON.stringify(port)}) },
-    bypassList: ["localhost", "127.0.0.1"]
-  }
-};
-chrome.proxy.settings.set({ value: config, scope: "regular" }, function() {});
-
-chrome.webRequest.onAuthRequired.addListener(
-  function(details) {
-    return { authCredentials: { username: ${JSON.stringify(user)}, password: ${JSON.stringify(pass)} } };
-  },
-  { urls: ["<all_urls>"] },
-  ["blocking"]
-);
-`
-
-  fs.writeFileSync(path.join(extDir, 'manifest.json'), manifest)
-  fs.writeFileSync(path.join(extDir, 'background.js'), background)
-
-  console.log(`[proxy] Auth extension built → ${extDir}`)
-  return extDir
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
@@ -175,9 +117,14 @@ async function getBffStatus(driver) {
 }
 
 /**
- * Verify one phone number using DOM state — no BFF log interception.
- * Valid   → arrow/next button with img appears inside the form
- * Invalid → InputField_error_1 div appears, OR Notification popup appears
+ * Verify one phone number using BFF network log interception (primary) with
+ * DOM error signals as a fast-exit fallback for obvious invalids.
+ *
+ * Primary:  HTTP 200 from /bff/profile/v3/valid/lyca-number → VALID
+ *           HTTP 4xx from the same endpoint              → INVALID
+ * Fallback: InputField_error_1 div or Notification popup → INVALID
+ *           No BFF response within 15s                   → INVALID
+ *
  * Returns true (valid) or false (invalid).
  */
 async function verifyNumber(driver, phone) {
@@ -225,57 +172,74 @@ async function verifyNumber(driver, phone) {
     await humanType(input, dialNumber)
     await sleep(1000)
 
+    // Flush stale performance logs before clicking so we only see THIS request
+    await driver.manage().logs().get('performance')
+
     // Click verify button
     const btn = await driver.findElement(By.css('div[class*="formContainer"] button'))
     await driver.executeScript('arguments[0].click()', btn)
 
-    // Poll DOM for result — up to 12 seconds
-    // Valid = green tick appears (positive confirmation only)
-    // Invalid = InputField_error_1 div appears, OR Notification popup appears
+    // Poll for result — up to 15 seconds
+    // PRIMARY: BFF HTTP status from Chrome performance logs
+    //   200 → valid, 4xx → invalid
+    // FAST-EXIT fallbacks (DOM signals for obvious invalids):
+    //   InputField_error_1 div or Notification popup → invalid immediately
     let isValid = false
+    let decided = false
     const deadline = Date.now() + 15000
+
     while (Date.now() < deadline) {
       await sleep(400)
 
-      // VALID signal: green tick image appears (number accepted)
-      const greenTicks = await driver.findElements(By.css('img[src*="greenTick"]'))
-      if (greenTicks.length > 0) {
-        console.log(`[worker] ${phone} → valid (green tick detected)`)
-        isValid = true
+      // PRIMARY: check BFF network response in perf logs
+      const bffStatus = await getBffStatus(driver)
+      if (bffStatus !== null) {
+        isValid = bffStatus === 200
+        console.log(`[worker] ${phone} → ${isValid ? 'valid' : 'invalid'} (BFF status ${bffStatus})`)
+        decided = true
         break
       }
 
-      // INVALID signal 1: error text div under input
+      // FAST-EXIT: error text div under input (confirmed invalid)
       const errorDivs = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
       if (errorDivs.length > 0) {
-        // Confirm it's still there after 1s to avoid transient flashes
-        await sleep(1000)
+        await sleep(600)
         const errorDivsConfirm = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
         if (errorDivsConfirm.length > 0) {
-          console.log(`[worker] ${phone} → invalid (error div confirmed)`)
+          console.log(`[worker] ${phone} → invalid (error div confirmed, no BFF response yet)`)
           isValid = false
+          decided = true
           break
         }
       }
 
-      // INVALID signal 2: notification popup (class match, ignores dynamic nth-child)
+      // FAST-EXIT: notification popup
       const popups = await driver.findElements(By.css('div[class*="Notification_boxPopupContainer"]'))
       if (popups.length > 0) {
-        // Confirm after 1s and check input is still present
-        await sleep(1000)
+        await sleep(600)
         const popupsConfirm = await driver.findElements(By.css('div[class*="Notification_boxPopupContainer"]'))
         const inputs = await driver.findElements(By.css('#default-input-field'))
         if (popupsConfirm.length > 0 && inputs.length > 0) {
-          console.log(`[worker] ${phone} → invalid (notification popup confirmed)`)
+          console.log(`[worker] ${phone} → invalid (notification popup confirmed, no BFF response yet)`)
           isValid = false
+          decided = true
           break
         }
-        console.log(`[worker] ${phone} → popup detected but not confirmed, skipping signal`)
       }
     }
 
-    if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 12s)`)
-    else console.log(`[worker] ${phone} → invalid (no green tick in 12s)`)
+    if (!decided) {
+      // Timeout — no BFF response and no DOM error signal
+      // Do one final BFF check before giving up
+      const finalBffStatus = await getBffStatus(driver)
+      if (finalBffStatus !== null) {
+        isValid = finalBffStatus === 200
+        console.log(`[worker] ${phone} → ${isValid ? 'valid' : 'invalid'} (BFF status ${finalBffStatus} on final check)`)
+      } else {
+        console.log(`[worker] ${phone} → invalid (timeout — no BFF response in 15s)`)
+        isValid = false
+      }
+    }
 
     // Small random delay between verifications to avoid rate limiting
     await sleep(1000 + Math.random() * 2000)
@@ -294,7 +258,10 @@ async function verifyNumber(driver, phone) {
   }
 }
 
-function startWorkers() {
+async function startWorkers() {
+  // Start the proxy tunnel once — all workers share the same local endpoint
+  await startProxyTunnel()
+
   for (let i = 0; i < WORKER_COUNT; i++) {
     let driver = null
 

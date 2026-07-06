@@ -20,6 +20,7 @@
     "nodemailer": "^9.0.3",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
+    "proxy-chain": "2.5.9",
     "selenium-webdriver": "^4.21.0"
   },
   "devDependencies": {
