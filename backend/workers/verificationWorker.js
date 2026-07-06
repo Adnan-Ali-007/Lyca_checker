@@ -142,15 +142,16 @@ async function verifyNumber(driver, phone) {
       }
     } catch (_) {}
 
-    // Wait for input field
+    // Wait for input field — use longer timeout when proxied (proxy adds latency)
+    const PAGE_WAIT_MS = process.env.PROXY_URL ? 25000 : 12000
     let input
     try {
-      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), 12000)
+      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), PAGE_WAIT_MS)
     } catch (_) {
       console.warn(`[worker] page load timeout for ${phone}, retrying...`)
       await driver.get(LYCA_URL)
-      await sleep(4000)
-      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), 12000)
+      await sleep(5000)
+      input = await driver.wait(until.elementLocated(By.css('#default-input-field')), PAGE_WAIT_MS)
     }
 
     // Scroll into view and focus
@@ -261,6 +262,9 @@ async function verifyNumber(driver, phone) {
 async function startWorkers() {
   // Start the proxy tunnel once — all workers share the same local endpoint
   await startProxyTunnel()
+
+  // Each worker adds SIGTERM + SIGINT listeners — raise the limit to avoid warning
+  process.setMaxListeners(WORKER_COUNT * 2 + 10)
 
   for (let i = 0; i < WORKER_COUNT; i++) {
     let driver = null
