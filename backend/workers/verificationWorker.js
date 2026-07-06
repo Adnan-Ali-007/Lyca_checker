@@ -180,14 +180,17 @@ async function verifyNumber(driver, phone) {
       // INVALID signal 2: notification popup (class match, ignores dynamic nth-child)
       const popups = await driver.findElements(By.css('div[class*="Notification_boxPopupContainer"]'))
       if (popups.length > 0) {
-        // Confirm after 1s and check input is still present
-        await sleep(1000)
-        const popupsConfirm = await driver.findElements(By.css('div[class*="Notification_boxPopupContainer"]'))
-        const inputs = await driver.findElements(By.css('#default-input-field'))
-        if (popupsConfirm.length > 0 && inputs.length > 0) {
-          console.log(`[worker] ${phone} → invalid (notification popup confirmed)`)
-          isValid = false
-          break
+        const popupText = await popups[0].getText().catch(() => '')
+        if (popupText.toLowerCase().includes('invalid') || popupText.toLowerCase().includes('credentials')) {
+          // Confirm after 1s and check input is still present
+          await sleep(1000)
+          const popupsConfirm = await driver.findElements(By.css('div[class*="Notification_boxPopupContainer"]'))
+          const inputs = await driver.findElements(By.css('#default-input-field'))
+          if (popupsConfirm.length > 0 && inputs.length > 0) {
+            console.log(`[worker] ${phone} → invalid (notification popup confirmed: "${popupText}")`)
+            isValid = false
+            break
+          }
         }
         console.log(`[worker] ${phone} → popup detected but not confirmed, skipping signal`)
       }
