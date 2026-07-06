@@ -154,14 +154,15 @@ async function verifyNumber(driver, phone) {
     // Invalid = InputField_error_1 OR Notification popup appears
     let isValid = true
     const deadline = Date.now() + 12000
+    await sleep(2000) // Wait for page to settle after button click
     while (Date.now() < deadline) {
       await sleep(400)
 
       // INVALID signal 1: error text div under input
       const errorDivs = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
       if (errorDivs.length > 0) {
-        // Confirm it's still there after 1s to avoid transient flashes
-        await sleep(1000)
+        // Confirm it's still there after 2s to avoid transient flashes
+        await sleep(2000)
         const errorDivsConfirm = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
         if (errorDivsConfirm.length > 0) {
           console.log(`[worker] ${phone} → invalid (error div confirmed)`)
