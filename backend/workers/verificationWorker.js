@@ -146,9 +146,9 @@ async function verifyNumber(driver, phone) {
     await driver.executeScript('arguments[0].click()', btn)
 
     // Poll DOM for result — up to 12 seconds
-    // Valid = green tick appears OR no invalid signal within the window
+    // Valid = green tick appears (positive confirmation only)
     // Invalid = InputField_error_1 div appears, OR Notification popup appears
-    let isValid = true
+    let isValid = false
     const deadline = Date.now() + 12000
     while (Date.now() < deadline) {
       await sleep(400)
@@ -191,6 +191,7 @@ async function verifyNumber(driver, phone) {
     }
 
     if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 12s)`)
+    else console.log(`[worker] ${phone} → invalid (no green tick in 12s)`)
 
     // Small random delay between verifications to avoid rate limiting
     await sleep(1000 + Math.random() * 2000)
