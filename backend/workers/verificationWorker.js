@@ -161,13 +161,19 @@ async function verifyNumber(driver, phone) {
       // INVALID signal 1: error text div under input
       const errorDivs = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
       if (errorDivs.length > 0) {
-        // Confirm it's still there after 2s to avoid transient flashes
-        await sleep(2000)
-        const errorDivsConfirm = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
-        if (errorDivsConfirm.length > 0) {
-          console.log(`[worker] ${phone} → invalid (error div confirmed)`)
-          isValid = false
-          break
+        // Only mark invalid if the error text is the actual invalid number message
+        const errorText = await errorDivs[errorDivs.length - 1].getText().catch(() => '')
+        if (!errorText.toLowerCase().includes('invalid') && !errorText.toLowerCase().includes('credentials')) {
+          // Not a real invalid signal — skip
+        } else {
+          // Confirm it's still there after 2s to avoid transient flashes
+          await sleep(2000)
+          const errorDivsConfirm = await driver.findElements(By.css('div[class*="InputField_error_1"]'))
+          if (errorDivsConfirm.length > 0) {
+            console.log(`[worker] ${phone} → invalid (error div confirmed: "${errorText}")`)
+            isValid = false
+            break
+          }
         }
       }
 
