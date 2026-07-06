@@ -1,4 +1,4 @@
-const { Worker } = require('bullmq')
+﻿const { Worker } = require('bullmq')
 const { makeRedis } = require('../queue/queue')
 const { Builder, By, until, Key } = require('selenium-webdriver')
 const chrome = require('selenium-webdriver/chrome')
@@ -44,12 +44,10 @@ function buildChromeOptions(workerIndex) {
   const proxyUrl = process.env.PROXY_URL
   if (proxyUrl) {
     // Chrome only supports socks5://, not socks5h:// — convert if needed
-    // For http:// proxies, Chrome needs the format without protocol prefix
-    let chromeProxyUrl = proxyUrl.replace(/^socks5h:\/\//, 'socks5://')
-    if (chromeProxyUrl.startsWith('http://')) {
-      chromeProxyUrl = chromeProxyUrl.replace(/^http:\/\//, '')
-    }
+    const chromeProxyUrl = proxyUrl.replace(/^socks5h:\/\//, 'socks5://')
     opts.addArguments(`--proxy-server=${chromeProxyUrl}`)
+    // Force DNS resolution through the proxy (prevents DNS leaks)
+    opts.addArguments('--proxy-dns')
   }
 
   opts.addArguments(
@@ -189,7 +187,7 @@ async function verifyNumber(driver, phone) {
     if (isValid) console.log(`[worker] ${phone} → valid (no invalid signal in 12s)`)
 
     // Small random delay between verifications to avoid rate limiting
-    await sleep(500 + Math.random() * 1000)
+    await sleep(1000 + Math.random() * 2000)
 
     return isValid
 
