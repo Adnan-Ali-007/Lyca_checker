@@ -149,7 +149,7 @@ async function verifyNumber(driver, phone) {
     // Valid = green tick appears (positive confirmation only)
     // Invalid = InputField_error_1 div appears, OR Notification popup appears
     let isValid = false
-    const deadline = Date.now() + 12000
+    const deadline = Date.now() + 15000
     while (Date.now() < deadline) {
       await sleep(400)
 
